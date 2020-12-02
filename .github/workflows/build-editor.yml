@@ -1,0 +1,244 @@
+name: Build Editor
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Unity minor/patch version to build.\ne.g. 2018.3, 2018.3.14f1"
+        required: true
+      modules:
+        description: "Unity modules to build.\nMultiple values must be separated by a comma(,)."
+        required: false
+        default: "base,linux-il2cpp,windows-mono,mac-mono,ios,android,webgl"
+
+jobs:
+  setup-editor:
+    name: Setup build matrix
+    runs-on: ubuntu-18.04
+    outputs:
+      matrix: ${{ steps.setup.outputs.matrix }}
+      exist-tags: ${{ steps.setup.outputs.exist-tags }}
+      exit: ${{ steps.setup.outputs.exit }}
+    steps:
+      # Setup env
+      - uses: actions/checkout@v2
+      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
+
+      # Setup build matrix
+      - name: Setup build matrix
+        id: setup
+        run: |
+          # Show inputs
+          echo "inputs: ${{ toJson(github.event.inputs) }}"
+
+          echo "###########################################"
+          echo "#      Find available Unity versions      #"
+          echo "###########################################"
+          echo -n "${{ env.IGNORED_UNITY_VERSIONS }}" > .ignoreversions
+          VERSIONS=`npx unity-changeset list --versions --min '${{ env.MINIMUM_UNITY_VERSION }}' --grep '${{ github.event.inputs.version }}' --all \
+            | grep -v -f .ignoreversions || :`
+
+          echo "$VERSIONS"
+          [ "$VERSIONS" = '' ] && echo "::error::No versions to build.%0A[Ignore versions]%0A`cat .ignoreversions`" && exit 1
+
+          echo "###########################################"
+          echo "#       Find available Unity modules      #"
+          echo "###########################################"
+          # In Unity 2019.2 or earlier, module 'linux-il2cpp' is not supported.
+          [ -n "`echo "${{ github.event.inputs.version }}" | grep '2017\|2018\|2019.1\|2019.2'`" ] && IGNORED_MODULE='linux-il2cpp' || IGNORED_MODULE='__'
+
+          echo -n "${{ env.UNITY_MODULES }}" | grep -v "$IGNORED_MODULE" > .unitymodules
+          MODULES=`echo '${{ github.event.inputs.modules }}' \
+            | tr -d ' ' \
+            | tr ',' '\n' \
+            | grep -f .unitymodules || :`
+
+          echo "$MODULES"
+          [ "$MODULES" = '' ] && echo "::error::No modules to build." && exit 1
+
+          echo "###########################################"
+          echo "#        Get latest vesion of repo        #"
+          echo "###########################################"
+          REPO_LATEST_TAG=`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='v:refname' --tags https://github.com/${{ github.repository }} 'v*.*' \
+            | tail -n 1 \
+            | cut -d '/' -f 3 \
+            | cut -c 2-`
+
+          array=(${REPO_LATEST_TAG//./ })
+          REPO_VERSION_FULL=${array[0]}.${array[1]}.${array[2]:-0}
+          REPO_VERSION_MAJOR=${array[0]}
+          REPO_VERSION_MINOR=${array[0]}.${array[1]}
+          echo "$REPO_VERSION_FULL"
+
+          echo "###########################################"
+          echo "#       Exclude completed versions        #"
+          echo "###########################################"
+          echo "" > EXIST_TAGS
+          curl -sSL https://index.docker.io/v1/repositories/${{ env.EDITOR_IMAGE }}/tags \
+            | jq -r '.[].name' \
+            | grep -e "-$REPO_VERSION_FULL$" > EXIST_TAGS || :
+
+          VERSIONS=` \
+          for version in $(echo "$VERSIONS") ; do \
+            for module in $(echo "$MODULES") ; do \
+              if [ -z "$(grep -x ${version}-${module}-$REPO_VERSION_FULL EXIST_TAGS)" ] ; then \
+                echo "$version" ; \
+                break; \
+              fi \
+            done \
+          done`
+
+          echo "$VERSIONS"
+          COMBINATION_COUNT=`expr $(echo -n "$VERSIONS" | wc -l) \* $(echo -n "$MODULES" | wc -l)` || :
+          echo "$COMBINATION_COUNT version-module combinations to build."
+          [ $COMBINATION_COUNT -gt 256 ] && echo "::error::Too many version-module combinations (>256) to build." && exit 1
+          [ $COMBINATION_COUNT -eq 0 ] && echo "::warning::No version-module combinations to build." && echo "::set-output name=exit::true" && exit 0
+
+          echo "###########################################"
+          echo "#            Setup build matrix           #"
+          echo "###########################################"
+          VERSIONS=`echo "$VERSIONS" | paste -s -d ',' - | sed 's/,/\", \"/g' || :`
+          MODULES=`echo "$MODULES" | paste -s -d ',' - | sed 's/,/\", \"/g' || :`
+
+          matrix="{ \
+            \"version\":[\"$VERSIONS\"], \
+            \"module\":[\"$MODULES\"], \
+            \"repoVersionFull\":[\"$REPO_VERSION_FULL\"], \
+            \"repoVersionMajor\":[\"$REPO_VERSION_MAJOR\"], \
+            \"repoVersionMinor\":[\"$REPO_VERSION_MINOR\"] \
+          }"
+          echo "$matrix"
+          echo "::set-output name=matrix::$matrix"
+          echo "::set-output name=exist-tags::`cat EXIST_TAGS`"
+          echo "::set-output name=exit::false"
+
+  build:
+    name: Build ${{ matrix.version }}-${{ matrix.module }}-${{ matrix.repoVersionFull }}
+    if: needs.setup-editor.outputs.exit != 'true'
+    needs: setup-editor
+    runs-on: ubuntu-18.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-editor.outputs.matrix) }}
+      # The matrix is expanded like this:
+      # matrix:
+      #   version:
+      #     - 2018.3.1f1
+      #     - 2018.3.2f1
+      #     ...
+      #   module:
+      #     - base
+      #     - linux-il2cpp
+      #     ...
+      #   repoVersionFull:
+      #     - 0.7.0
+      #   repoVersionMajor:
+      #     - 0
+      #   repoVersionMinor:
+      #     - 0.7
+    steps:
+      # Setup env
+      - uses: actions/checkout@v2
+      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
+
+      ###########################
+      #          Check          #
+      ###########################
+      - name: Check to build
+        run: |
+          echo "${{ needs.setup-editor.outputs.exist-tags }}" > EXIST_TAGS
+          cat EXIST_TAGS
+
+          # [SKIP] Tag is ignored to build.
+          echo -n "${{ env.IGNORED_IMAGE_TAGS }}" > .ignoretags
+          TAG=${{ matrix.version }}-${{ matrix.module }}-${{ matrix.repoVersionFull }}
+          if [ -n "`echo $TAG | grep -f .ignoretags`" ] ; then
+            echo "::warning::Tag $TAG is ignored to build. Build steps will be skipped.%0A[Ignore tags]%0A`cat .ignoretags`"
+
+          # [SKIP] Image already exists.
+          elif [ -n "`grep -x $TAG EXIST_TAGS`" ] ; then
+            echo "::warning::Image ${{ env.EDITOR_IMAGE }}:$TAG already exists. Build steps will be skipped."
+
+          # Ready to build.
+          else
+            CHANGESET=`npx unity-changeset ${{ matrix.version }}`
+            echo "Image ${{ env.EDITOR_IMAGE }}:${TAG} does not exist. Build image.%0A[Change Set] $CHANGESET"
+            echo "CHANGESET=$CHANGESET" >> $GITHUB_ENV
+          fi
+
+      ###########################
+      #          Setup          #
+      ###########################
+      - name: Set up QEMU
+        if: env.CHANGESET != ''
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        if: env.CHANGESET != ''
+        uses: docker/setup-buildx-action@v1
+      - name: Login to DockerHub
+        if: env.CHANGESET != ''
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # Cache limitation: 5GB per repo, and 7days.
+      # Do not cache each version because it is too small to install Unity.
+      - name: Cache Docker layers
+        if: env.CHANGESET != ''
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-${{ matrix.repoVersionFull }}-${{ github.sha }}
+
+      ###########################
+      #     Free disk space     #
+      ###########################
+      - name: Free disk space
+        if: env.CHANGESET != ''
+        run: |
+          # Based on:
+          #   https://github.com/apache/flink/blob/master/tools/azure-pipelines/free_disk_space.sh
+          #   https://github.com/actions/virtual-environments/issues/709#issuecomment-612569242
+          echo "==== Disk space before:"
+          df -h
+
+          echo "==== Removing large directories..."
+          rm -rf /usr/share/dotnet/ \
+            /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY"
+
+          echo "==== Disk space after:"
+          df -h
+
+      ###########################
+      #      Editor image       #
+      ###########################
+      - name: Build and publish
+        if: env.CHANGESET != ''
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./editor/Dockerfile
+          build-args: |
+            hubImage=${{ env.HUB_IMAGE }}:${{ matrix.repoVersionFull }}
+            baseImage=${{ env.BASE_IMAGE }}:${{ matrix.repoVersionFull }}
+            version=${{ matrix.version }}
+            changeSet=${{ env.CHANGESET }}
+            module=${{ matrix.module }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          push: true
+          tags: |
+            ${{ env.EDITOR_IMAGE }}:${{ matrix.version }}-${{ matrix.module }}
+            ${{ env.EDITOR_IMAGE }}:${{ matrix.version }}-${{ matrix.module }}-${{ matrix.repoVersionFull }}
+            ${{ env.EDITOR_IMAGE }}:${{ matrix.version }}-${{ matrix.module }}-${{ matrix.repoVersionMajor }}
+            ${{ env.EDITOR_IMAGE }}:${{ matrix.version }}-${{ matrix.module }}-${{ matrix.repoVersionMinor }}
+          ### Warning: If we once publish latest, we will have to do it forever. Lets not do that unless it's needed ###
+          ### Another warning: order is important: We go from specific to unspecific with the exception of the most specific tag which is used to check if the image is already there ###
+
+      ###########################
+      #         Metrics         #
+      ###########################
+      - name: Disk space after
+        if: always()
+        run: df -h

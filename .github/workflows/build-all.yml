@@ -1,0 +1,145 @@
+name: Build All
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  setup:
+    name: Setup build matrix
+    runs-on: ubuntu-18.04
+    outputs:
+      matrix: ${{ steps.setup.outputs.matrix }}
+      exit: ${{ steps.setup.outputs.exit }}
+    steps:
+      # Setup env
+      - uses: actions/checkout@v2
+      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
+
+      # Setup build matrix
+      - name: Setup build matrix
+        id: setup
+        run: |
+          echo "###########################################"
+          echo "#        Get latest vesion of repo        #"
+          echo "###########################################"
+          REPO_LATEST_TAG=`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='v:refname' --tags https://github.com/${{ github.repository }} 'v*.*' \
+            | tail -n 1 \
+            | cut -d '/' -f 3 \
+            | cut -c 2-`
+
+          array=(${REPO_LATEST_TAG//./ })
+          REPO_VERSION_FULL=${array[0]}.${array[1]}.${array[2]:-0}
+          REPO_VERSION_MAJOR=${array[0]}
+          REPO_VERSION_MINOR=${array[0]}.${array[1]}
+          echo "$REPO_VERSION_FULL"
+
+          echo "###########################################"
+          echo "#              Check image tag            #"
+          echo "###########################################"
+          # Source: https://stackoverflow.com/a/39731444/3593896
+          function docker_tag_exists() {
+            curl --silent -f -lSL https://index.docker.io/v1/repositories/$1/tags/$REPO_VERSION_FULL > /dev/null
+          }
+
+          if docker_tag_exists "${{ env.BASE_IMAGE }}" && docker_tag_exists "${{ env.HUB_IMAGE }}" ; then
+            echo "::warning::Image already exists." && exit 0
+            echo "::set-output name=exit::true"
+          fi
+
+          echo "###########################################"
+          echo "#            Setup build matrix           #"
+          echo "###########################################"
+          matrix="{ \
+            \"repoVersionFull\":[\"$REPO_VERSION_FULL\"], \
+            \"repoVersionMajor\":[\"$REPO_VERSION_MAJOR\"], \
+            \"repoVersionMinor\":[\"$REPO_VERSION_MINOR\"] \
+          }"
+          echo "$matrix"
+          echo "::set-output name=matrix::$matrix"
+          echo "::set-output name=exit::false"
+
+  build:
+    name: "Build all"
+    if: needs.setup.outputs.exit != 'true'
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+      # The matrix is expanded like this:
+      # matrix:
+      #   repoVersionFull:
+      #     - 0.7.0
+      #   repoVersionMajor:
+      #     - 0
+      #   repoVersionMinor:
+      #     - 0.7
+    steps:
+      # Setup env
+      - uses: actions/checkout@v2
+      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
+
+      ###########################
+      #          Setup          #
+      ###########################
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-${{ matrix.repoVersionFull }}-${{ github.sha }}
+          restore-keys: |
+            $${{ runner.os }}-${{ matrix.repoVersionFull }}-
+            $${{ runner.os }}-
+      ###########################
+      #     Build base image    #
+      ###########################
+      - name: Build and publish (Base)
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./base/Dockerfile
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          push: true
+          tags: |
+            ${{ env.BASE_IMAGE }}:${{ matrix.repoVersionFull }}
+            ${{ env.BASE_IMAGE }}:${{ matrix.repoVersionMinor }}
+            ${{ env.BASE_IMAGE }}:${{ matrix.repoVersionMajor }}
+            ${{ env.BASE_IMAGE }}:latest
+      ###########################
+      #     Build hub image     #
+      ###########################
+      - name: Build and publish (Hub)
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./hub/Dockerfile
+          build-args: baseImage=${{ env.BASE_IMAGE }}:${{ matrix.repoVersionFull }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          push: true
+          tags: |
+            ${{ env.HUB_IMAGE }}:${{ matrix.repoVersionFull }}
+            ${{ env.HUB_IMAGE }}:${{ matrix.repoVersionMinor }}
+            ${{ env.HUB_IMAGE }}:${{ matrix.repoVersionMajor }}
+            ${{ env.HUB_IMAGE }}:latest
+      ###########################
+      #    Build editor image   #
+      ###########################
+      - name: "Dispatch 'Build Editor All' workflow"
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: Build Editor All
+          token: ${{ secrets.WORKFLOW_TOKEN }}

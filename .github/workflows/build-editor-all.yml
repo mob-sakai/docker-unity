@@ -1,0 +1,68 @@
+name: "Build Editor All"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Unity major/minor/patch version to build.\nIf empty, build all available versions (>=2018.3).\ne.g. 2018, 2019.4"
+        required: false
+      modules:
+        description: "Unity modules to build.\nMultiple values must be separated by a comma(,)."
+        required: false
+        default: "base,linux-il2cpp,windows-mono,mac-mono,ios,android,webgl"
+
+jobs:
+  setup-trigger:
+    name: Setup build matrix
+    runs-on: ubuntu-18.04
+    outputs:
+      matrix: ${{ steps.setup.outputs.matrix }}
+    steps:
+      # Setup env
+      - uses: actions/checkout@v2
+      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
+
+      - name: Setup build matrix
+        id: setup
+        run: |
+          # Show inputs
+          echo "inputs: ${{ toJson(github.event.inputs) }}"
+
+          echo "###########################################"
+          echo "#      Find available Unity versions      #"
+          echo "###########################################"
+          VERSIONS=`npx unity-changeset list --minor-versions --min '${{ env.MINIMUM_UNITY_VERSION }}' --grep '${{ github.event.inputs.version }}' --all \
+            | paste -s -d ',' - | sed 's/,/\",\"/g' || :`
+
+          echo "###########################################"
+          echo "#            Setup build matrix           #"
+          echo "###########################################"
+          matrix="{ \
+            \"version\":[\"$VERSIONS\"], \
+            \"modules\":[\"${{ github.event.inputs.modules }}\"] \
+          }"
+          echo "$matrix"
+          echo "::set-output name=matrix::$matrix"
+
+  dispatch:
+    name: ${{ matrix.version }} (${{ matrix.modules }})
+    needs: setup-trigger
+    runs-on: ubuntu-18.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-trigger.outputs.matrix) }}
+      # The matrix is expanded like this:
+      # matrix:
+      #   version:
+      #     - 2018.3.1f1
+      #     - 2018.3.2f1
+      #     ...
+      #   modules:
+      #     - base,linux-il2cpp,...
+    steps:
+      - name: Dispatch 'Build Editor' workflow
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: Build Editor
+          token: ${{ secrets.WORKFLOW_TOKEN }}
+          inputs: '{ "version": "${{ matrix.version }}", "modules": "${{ matrix.modules }}" }'
