@@ -1,0 +1,104 @@
+name: "Request Activation License File"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Unity major/minor/patch version to build.\nIf empty, build all available versions (>=2018.3).\ne.g. 2018, 2019.4"
+        required: false
+
+jobs:
+  setup:
+    name: Setup build matrix
+    runs-on: ubuntu-18.04
+    outputs:
+      matrix: ${{ steps.setup.outputs.matrix }}
+      repoVersionFull: ${{ steps.setup.outputs.repoVersionFull }}
+    steps:
+      # Setup env
+      - uses: actions/checkout@v2
+      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
+
+      - name: Setup build matrix
+        id: setup
+        run: |
+          # Show inputs
+          echo "inputs: ${{ toJson(github.event.inputs) }}"
+
+          echo "###########################################"
+          echo "#        Get latest vesion of repo        #"
+          echo "###########################################"
+          REPO_LATEST_TAG=`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='v:refname' --tags https://github.com/${{ github.repository }} 'v*.*' \
+            | tail -n 1 \
+            | cut -d '/' -f 3 \
+            | cut -c 2-`
+
+          array=(${REPO_LATEST_TAG//./ })
+          REPO_VERSION_FULL=${array[0]}.${array[1]}.${array[2]:-0}
+          echo "$REPO_VERSION_FULL"
+
+          echo "###########################################"
+          echo "#       Find available custom image       #"
+          echo "###########################################"
+          CUSTOM_IMAGES=`curl -sSL https://index.docker.io/v1/repositories/${{ env.EDITOR_IMAGE }}/tags \
+            | jq -r '.[].name' \
+            | grep -v '^ubuntu' \
+            | grep -e "^${{ github.event.inputs.version }}.*-base-$REPO_VERSION_FULL$" \
+            | xargs -I {} echo "${{ env.EDITOR_IMAGE }}:{}" \
+            | paste -s -d ',' - \
+            | sed 's/,/\",\"/g' || :`
+
+          [ "$CUSTOM_IMAGES" = '' ] && echo "::error::No custom images to request." && exit 1
+          echo "$CUSTOM_IMAGES"
+
+          echo "###########################################"
+          echo "#            Setup build matrix           #"
+          echo "###########################################"
+          matrix="{ \
+            \"customImage\":[\"$CUSTOM_IMAGES\"] \
+          }"
+          echo "$matrix"
+          echo "::set-output name=matrix::$matrix"
+          echo "::set-output name=repoVersionFull::$REPO_VERSION_FULL"
+
+  request:
+    name: Request for (${{ matrix.customImage }})
+    needs: setup
+    runs-on: ubuntu-18.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+      # The matrix is expanded like this:
+      # matrix:
+      #   customImage:
+      #     - owner/image:2018.3.0f2-base-0.7.0
+      #     - owner/image:2018.3.10f1-base-0.7.0
+      #     ...
+    steps:
+      - uses: mob-sakai/unity-request-activation-file@custom_image
+        with:
+          customImage: ${{ matrix.customImage }}
+
+      - uses: actions/upload-artifact@v2
+        if: always()
+        with:
+          name: UnityActivationLicenseFiles
+          path: '*.alf'
+
+  upload:
+    name: Release ${{ needs.setup.outputs.repoVersionFull }}
+    needs: [setup, request]
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: UnityActivationLicenseFiles
+          path: UnityActivationLicenseFiles
+      
+      - uses: meeDamian/github-release@2.0
+        with:
+          token: ${{ github.token }}
+          tag: v${{ needs.setup.outputs.repoVersionFull }}
+          gzip: true
+          allow_override: true
+          files: UnityActivationLicenseFiles/
