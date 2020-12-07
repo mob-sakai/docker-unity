@@ -7,80 +7,33 @@ on:
       - "v*"
 
 jobs:
-  setup:
-    name: Setup build matrix
-    runs-on: ubuntu-18.04
-    outputs:
-      matrix: ${{ steps.setup.outputs.matrix }}
-      exit: ${{ steps.setup.outputs.exit }}
-    steps:
-      # Setup env
-      - uses: actions/checkout@v2
-      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
-
-      # Setup build matrix
-      - name: Setup build matrix
-        id: setup
-        run: |
-          echo "###########################################"
-          echo "#        Get latest vesion of repo        #"
-          echo "###########################################"
-          REPO_LATEST_TAG=`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='v:refname' --tags https://github.com/${{ github.repository }} 'v*.*' \
-            | tail -n 1 \
-            | cut -d '/' -f 3 \
-            | cut -c 2-`
-
-          array=(${REPO_LATEST_TAG//./ })
-          REPO_VERSION_FULL=${array[0]}.${array[1]}.${array[2]:-0}
-          REPO_VERSION_MAJOR=${array[0]}
-          REPO_VERSION_MINOR=${array[0]}.${array[1]}
-          echo "$REPO_VERSION_FULL"
-
-          echo "###########################################"
-          echo "#              Check image tag            #"
-          echo "###########################################"
-          # Source: https://stackoverflow.com/a/39731444/3593896
-          function docker_tag_exists() {
-            curl --silent -f -lSL https://index.docker.io/v1/repositories/$1/tags/$REPO_VERSION_FULL > /dev/null
-          }
-
-          if docker_tag_exists "${{ env.BASE_IMAGE }}" && docker_tag_exists "${{ env.HUB_IMAGE }}" ; then
-            echo "::warning::Image already exists." && exit 0
-            echo "::set-output name=exit::true"
-          fi
-
-          echo "###########################################"
-          echo "#            Setup build matrix           #"
-          echo "###########################################"
-          matrix="{ \
-            \"repoVersionFull\":[\"$REPO_VERSION_FULL\"], \
-            \"repoVersionMajor\":[\"$REPO_VERSION_MAJOR\"], \
-            \"repoVersionMinor\":[\"$REPO_VERSION_MINOR\"] \
-          }"
-          echo "$matrix"
-          echo "::set-output name=matrix::$matrix"
-          echo "::set-output name=exit::false"
-
   build:
     name: "Build all"
-    if: needs.setup.outputs.exit != 'true'
-    needs: setup
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
-      # The matrix is expanded like this:
-      # matrix:
-      #   repoVersionFull:
-      #     - 0.7.0
-      #   repoVersionMajor:
-      #     - 0
-      #   repoVersionMinor:
-      #     - 0.7
+    runs-on: ubuntu-18.04
     steps:
-      # Setup env
+      ###########################
+      #        Setup env        #
+      ###########################
       - uses: actions/checkout@v2
-      - run: cat .github/workflows/.env | grep '^[^# ]' >> $GITHUB_ENV
+      - run: cat .github/workflows/.env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
+      - id: latest
+        run: |
+          echo "::set-output name=tag::`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='v:refname' --tags https://github.com/${{ github.repository }} 'v*.*' \
+              | tail -n 1 \
+              | cut -d '/' -f 3 \
+              | cut -c 2-`"
+
+      ###########################
+      #       Docker meta       #
+      ###########################
+      - uses: crazy-max/ghaction-docker-meta@v1
+        id: base_docker
+        with:
+          images: ${{ env.BASE_IMAGE }}
+      - uses: crazy-max/ghaction-docker-meta@v1
+        id: hub_docker
+        with:
+          images: ${{ env.HUB_IMAGE }}
 
       ###########################
       #          Setup          #
@@ -89,57 +42,77 @@ jobs:
         uses: docker/setup-qemu-action@v1
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
-      - name: Login to DockerHub
+        with:
+          buildkitd-flags: --debug
+      - name: Login to docker registry
         uses: docker/login-action@v1
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
       - name: Cache Docker layers
         uses: actions/cache@v2
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-${{ matrix.repoVersionFull }}-${{ github.sha }}
+          key: ${{ runner.os }}-${{ steps.latest.outputs.tag }}-${{ github.sha }}
           restore-keys: |
-            $${{ runner.os }}-${{ matrix.repoVersionFull }}-
-            $${{ runner.os }}-
+            ${{ runner.os }}-${{ steps.latest.outputs.tag }}-
+            ${{ runner.os }}-
+
       ###########################
       #     Build base image    #
       ###########################
-      - name: Build and publish (Base)
+      - name: Build (Base)
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: ./base/Dockerfile
+          file: .github/workflows/dockerfiles/base.Dockerfile
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
-          push: true
+          load: true
+          labels: ${{ steps.base_docker.outputs.labels }}
           tags: |
-            ${{ env.BASE_IMAGE }}:${{ matrix.repoVersionFull }}
-            ${{ env.BASE_IMAGE }}:${{ matrix.repoVersionMinor }}
-            ${{ env.BASE_IMAGE }}:${{ matrix.repoVersionMajor }}
-            ${{ env.BASE_IMAGE }}:latest
+            {{ env.BASE_IMAGE }}:${{ steps.latest.outputs.tag }}
+            {{ env.BASE_IMAGE }}:latest
+
       ###########################
       #     Build hub image     #
       ###########################
-      - name: Build and publish (Hub)
+      - name: Build (Hub)
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: ./hub/Dockerfile
-          build-args: baseImage=${{ env.BASE_IMAGE }}:${{ matrix.repoVersionFull }}
+          file: .github/workflows/dockerfiles/hub.Dockerfile
+          build-args: baseImage=${{ env.BASE_IMAGE }}:${{ steps.latest.outputs.tag }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
-          push: true
+          load: true
+          labels: ${{ steps.hub_docker.outputs.labels }}
           tags: |
-            ${{ env.HUB_IMAGE }}:${{ matrix.repoVersionFull }}
-            ${{ env.HUB_IMAGE }}:${{ matrix.repoVersionMinor }}
-            ${{ env.HUB_IMAGE }}:${{ matrix.repoVersionMajor }}
-            ${{ env.HUB_IMAGE }}:latest
+            {{ env.HUB_IMAGE }}:${{ steps.latest.outputs.tag }}
+            {{ env.HUB_IMAGE }}:latest
+
       ###########################
-      #    Build editor image   #
+      #     Build hub image     #
       ###########################
-      - name: "Dispatch 'Build Editor All' workflow"
+      - name: Push images
+        run: |
+          # Sometimes the image push fails.
+          #   >> failed commit on ref "layer-sha256:...": no response
+          #   See https://github.com/docker/build-push-action/blob/master/TROUBLESHOOTING.md
+          docker push ${{ env.BASE_IMAGE }} \
+            || docker push ${{ env.BASE_IMAGE }} \
+            || docker push ${{ env.BASE_IMAGE }}
+          docker push ${{ env.HUB_IMAGE }} \
+            || docker push ${{ env.HUB_IMAGE }} \
+            || docker push ${{ env.HUB_IMAGE }}
+
+      ###########################
+      # Build base editor image #
+      ###########################
+      - name: "Dispatch 'Build Editor' workflow"
         uses: benc-uk/workflow-dispatch@v1
         with:
-          workflow: Build Editor All
-          token: ${{ secrets.WORKFLOW_TOKEN }}
+          workflow: Build Editor
+          token: ${{ secrets.GH_WORKFLOW_TOKEN }}
+          inputs: '{ "module": "base", "repoTag": "${{ steps.latest.outputs.tag }}" }'

@@ -124,7 +124,7 @@ EOD
 | -------------------- | ------------------------------------------------------ |
 | `DOCKERHUB_USERNAME` | [Docker Hub][] user name.                              |
 | `DOCKERHUB_TOKEN`    | [Docker Hub][] access token.                           |
-| `WORKFLOW_TOKEN`     | [Github parsonal access token][] to dispatch workflow. |
+| `GH_TOKEN`     | [Github parsonal access token][] to dispatch workflow. |
 
 [Docker Hub]: https://hub.docker.com/
 [Github parsonal access token]: https://docs.github.com/en/free-pro-team@latest/github/authenticating-to-github/creating-a-personal-access-token
@@ -162,7 +162,10 @@ You can run them manually from the [Actions page](../../actions).
 
 <br><br><br>
 
-## :wrench: Github Actions for editor image
+## :wrench: Use custom image on Github Actions
+
+```yml
+```
 
 https://unity-ci.com/docs/github/getting-started
 
