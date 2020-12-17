@@ -1,6 +1,6 @@
 #!/usr/bin/env bash -ex
 
-source .github/workflows/.env
+source .env
 
 UNITY_VERSION=${1:-2021.1.0a7}
 MODULE=${2:-base}
@@ -21,7 +21,7 @@ ARGUMETNS="$(echo \
 )"
 
 if [ "$MODULE" = 'base'] ; then
-    docker build -f .github/workflows/dockerfiles/editor.Dockerfile $ARGUMETNS .
+    docker build -f dockerfiles/editor.Dockerfile $ARGUMETNS .
 else
-    docker build -f .github/workflows/dockerfiles/editor_module.Dockerfile $ARGUMETNS .
+    docker build -f dockerfiles/editor_module.Dockerfile $ARGUMETNS .
 fi

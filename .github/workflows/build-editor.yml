@@ -24,7 +24,7 @@ jobs:
       #        Setup env        #
       ###########################
       - uses: actions/checkout@v2
-      - run: cat .github/workflows/.env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
+      - run: cat .env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
 
       ###########################
       #   Setup build matrix    #
@@ -56,7 +56,7 @@ jobs:
           done`
 
           VERSIONS=`echo "$VERSIONS" | paste -s -d ',' - | sed 's/,/\", \"/g' || :`
-          [ "$VERSIONS" = '' ] && echo "::error::No versions to build.%0A[Ignore versions]%0A`cat .ignoreversions`" && echo "::set-output name=exit::true" && exit 1
+          [ "$VERSIONS" = '' ] && echo "::warning::No versions to build.%0A[Ignore versions]%0A`cat .ignoreversions`" && echo "::set-output name=exit::true" && exit 0
 
           matrix="{ \
             \"version\":[\"$VERSIONS\"], \
@@ -87,7 +87,7 @@ jobs:
       #        Setup env        #
       ###########################
       - uses: actions/checkout@v2
-      - run: cat .github/workflows/.env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
+      - run: cat .env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.event.inputs.repoTag }}
@@ -114,10 +114,10 @@ jobs:
             echo "Image $EDITOR_IMAGE:${TAG} does not exist. Build image.%0A[Change Set] $CHANGESET"
             echo "::set-output name=changeset::$CHANGESET"
             if [ "${{ matrix.module }}" = 'base' ] ; then
-              echo "::set-output name=dockerFile::.github/workflows/dockerfiles/editor.Dockerfile"
+              echo "::set-output name=dockerFile::dockerfiles/editor.Dockerfile"
               echo "::set-output name=dockerTag::${{ matrix.version }}"
             else
-              echo "::set-output name=dockerFile::.github/workflows/dockerfiles/editor_module.Dockerfile"
+              echo "::set-output name=dockerFile::dockerfiles/editor_module.Dockerfile"
               echo "::set-output name=dockerTag::$TAG"
             fi
           fi

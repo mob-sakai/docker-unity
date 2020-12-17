@@ -15,7 +15,7 @@ jobs:
       #        Setup env        #
       ###########################
       - uses: actions/checkout@v2
-      - run: cat .github/workflows/.env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
+      - run: cat .env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
 
       - name: Get latest tag
         id: latest
@@ -63,7 +63,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: .github/workflows/dockerfiles/base.Dockerfile
+          file: dockerfiles/base.Dockerfile
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
           load: true
@@ -87,7 +87,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: .github/workflows/dockerfiles/hub.Dockerfile
+          file: dockerfiles/hub.Dockerfile
           build-args: baseImage=${{ env.BASE_IMAGE }}:${{ steps.latest.outputs.tag }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
