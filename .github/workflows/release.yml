@@ -23,9 +23,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
 
-      - run: |
+      - name: Release
+        id: release
+        run: |
           npm ci
           npx semantic-release
+
+          echo "::set-output name=tag::`git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='v:refname' --tags https://github.com/${{ github.repository }} 'v*.*' \
+              | tail -n 1 \
+              | cut -d '/' -f 3`"
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -34,3 +40,4 @@ jobs:
         with:
           workflow: Build All
           token: ${{ secrets.GH_WORKFLOW_TOKEN }}
+          ref: ${{ steps.release.outputs.tag }}

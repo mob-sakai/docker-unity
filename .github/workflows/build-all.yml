@@ -2,7 +2,7 @@ name: Build All
 
 on:
   workflow_dispatch:
-  push:
+  create:
     tags:
       - "v*"
 
@@ -48,7 +48,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-${{ github.event.inputs.repoTag }}
+          key: ${{ runner.os }}-${{ steps.latest.outputs.tag }}
           restore-keys: ${{ runner.os }}-
 
       ###########################
@@ -58,7 +58,6 @@ jobs:
         id: base_docker
         with:
           images: ${{ env.BASE_IMAGE }}
-          tag-semver: '{{version}}'
       - name: Build (Base)
         uses: docker/build-push-action@v2
         with:
@@ -66,15 +65,9 @@ jobs:
           file: dockerfiles/base.Dockerfile
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
-          load: true
+          push: true
           labels: ${{ steps.base_docker.outputs.labels }}
           tags: ${{ steps.base_docker.outputs.tags }}
-      - name: Push (Base)
-        run: |
-          # Sometimes the image push fails.
-          docker push ${{ env.BASE_IMAGE }} \
-            || docker push ${{ env.BASE_IMAGE }} \
-            || docker push ${{ env.BASE_IMAGE }}
 
       ###########################
       #  Build and push (Hub)   #
@@ -91,15 +84,9 @@ jobs:
           build-args: baseImage=${{ env.BASE_IMAGE }}:${{ steps.latest.outputs.tag }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
-          load: true
+          push: true
           labels: ${{ steps.hub_docker.outputs.labels }}
           tags: ${{ steps.hub_docker.outputs.tags }}
-      - name: Push (Hub)
-        run: |
-          # Sometimes the image push fails.
-          docker push ${{ env.HUB_IMAGE }} \
-            || docker push ${{ env.HUB_IMAGE }} \
-            || docker push ${{ env.HUB_IMAGE }}
 
       ###########################
       # Build base editor image #
@@ -110,3 +97,4 @@ jobs:
           workflow: Build Editor
           token: ${{ secrets.GH_WORKFLOW_TOKEN }}
           inputs: '{ "module": "base", "repoTag": "${{ steps.latest.outputs.tag }}" }'
+          ref: ${{ steps.latest.outputs.tag }}

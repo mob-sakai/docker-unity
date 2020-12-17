@@ -29,6 +29,12 @@ jobs:
       ###########################
       #   Setup build matrix    #
       ###########################
+      - name: Login to docker registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
       - name: Setup build matrix
         id: setup
         run: |
@@ -243,3 +249,4 @@ jobs:
           workflow: Build Editor
           token: ${{ secrets.GH_WORKFLOW_TOKEN }}
           inputs: '{ "module": "${{ matrix.module }}", "repoTag": "${{ github.event.inputs.repoTag }}" }'
+          ref: ${{ github.event.inputs.repoTag }}
