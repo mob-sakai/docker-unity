@@ -1,0 +1,33 @@
+{
+  "name": "@mob-sakai/docker-unity",
+  "version": "1.0.0",
+  "description": "New series of CI-specialised docker images for Unity. Superseding the famous gableroux/unity3d images.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mob-sakai/docker-unity.git"
+  },
+  "author": "mob-sakai <sakai861104@gmail.com> (https://github.com/mob-sakai)",
+  "scripts": {
+    "package:format": "npx format-package -w",
+    "package:update": "npx ncu -u && npm install && npm audit fix",
+    "release": "semantic-release",
+    "release:debug": "semantic-release --debug --dry-run -no-ci"
+  },
+  "release": {
+    "branches": [
+      "+([0-9])?(.{+([0-9]),x}).x",
+      "main"
+    ],
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      "@semantic-release/github"
+    ]
+  },
+  "dependencies": {
+    "@semantic-release/changelog": "^5.0.1",
+    "semantic-release": "^17.3.0"
+  }
+}
