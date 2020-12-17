@@ -1,6 +1,6 @@
-ARG hubImage="unityci/hub"
-ARG baseImage="unityci/base"
-ARG editorBaseImage="unityci/editor"
+ARG hubImage
+ARG baseImage
+ARG editorBaseImage
 
 ###########################
 #         Builder         #
