@@ -19,21 +19,12 @@ jobs:
       matrix: ${{ steps.setup.outputs.matrix }}
       existTags: ${{ steps.setup.outputs.existTags }}
       exit: ${{ steps.setup.outputs.exit }}
-      labels: ${{ steps.docker.outputs.labels }}
     steps:
       ###########################
       #        Setup env        #
       ###########################
       - uses: actions/checkout@v2
       - run: cat .github/workflows/.env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
-
-      ###########################
-      #       Docker meta       #
-      ###########################
-      - uses: crazy-max/ghaction-docker-meta@v1
-        id: docker
-        with:
-          images: ${{ env.EDITOR_IMAGE }}
 
       ###########################
       #   Setup build matrix    #
@@ -49,6 +40,7 @@ jobs:
               | jq -r '.Tags[]' \
               | grep -e "-${{ github.event.inputs.repoTag }}$" > EXIST_TAGS || :
 
+          echo '' > .ignoreversions
           if [ "${{ github.event.inputs.module }}" == 'base' ] ; then
               echo -n "$IGNORED_UNITY_VERSIONS" | grep '.' > .ignoreversions
               VERSIONS=`npx unity-changeset list --versions --min $MINIMUM_UNITY_VERSION --all \
@@ -60,10 +52,10 @@ jobs:
           fi
 
           VERSIONS=`for version in $(echo "$VERSIONS") ; do \
-              [ ! $(grep -x "${version}-${{ github.event.inputs.module }}-${{ github.event.inputs.repoTag }}" EXIST_TAGS) ] && echo "$version" ; \
+              [ ! $(grep -x "${version}-${{ github.event.inputs.module }}-${{ github.event.inputs.repoTag }}" EXIST_TAGS) ] && echo "$version" || : ; \
           done`
 
-          echo "$VERSIONS"
+          VERSIONS=`echo "$VERSIONS" | paste -s -d ',' - | sed 's/,/\", \"/g' || :`
           [ "$VERSIONS" = '' ] && echo "::error::No versions to build.%0A[Ignore versions]%0A`cat .ignoreversions`" && echo "::set-output name=exit::true" && exit 1
 
           matrix="{ \
@@ -74,7 +66,6 @@ jobs:
           echo "::set-output name=matrix::$matrix"
           echo "::set-output name=existTags::`cat EXIST_TAGS`"
           echo "::set-output name=exit::false"
-          echo "::set-output name=repoTag::${{ github.event.inputs.repoTag }}"
 
   build:
     name: Build ${{ matrix.version }} ${{ matrix.module }}
@@ -83,7 +74,6 @@ jobs:
     runs-on: ubuntu-18.04
     strategy:
       fail-fast: false
-      # max-parallel: 6
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
       # The matrix is expanded like this:
       # matrix:
@@ -98,14 +88,9 @@ jobs:
       ###########################
       - uses: actions/checkout@v2
       - run: cat .github/workflows/.env | sed 's/=\" *$/<<EOD/g' | sed 's/^\"/EOD/g' | grep '^[^# ]' >> $GITHUB_ENV
-
-      ###########################
-      #       Docker meta       #
-      ###########################
-      - uses: crazy-max/ghaction-docker-meta@v1
-        id: docker
+      - uses: actions/checkout@v2
         with:
-          images: ${{ env.EDITOR_IMAGE }}
+          ref: ${{ github.event.inputs.repoTag }}
 
       ###########################
       #          Check          #
@@ -162,10 +147,8 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-${{ github.event.inputs.repoTag }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-${{ github.event.inputs.repoTag }}-
-            ${{ runner.os }}-
+          key: ${{ runner.os }}-${{ github.event.inputs.repoTag }}
+          restore-keys: ${{ runner.os }}-
 
       ###########################
       #     Free disk space     #
@@ -190,6 +173,15 @@ jobs:
       ###########################
       #      Editor image       #
       ###########################
+      - uses: crazy-max/ghaction-docker-meta@v1
+        id: docker
+        with:
+          images: ${{ env.EDITOR_IMAGE }}
+          tag-custom-only: true
+          tag-custom: |
+            ${{ matrix.version }}-${{ matrix.module }}-${{ github.event.inputs.repoTag }}
+            ${{ matrix.version }}-${{ matrix.module }}
+
       - name: Build
         if: steps.check.outputs.changeset != ''
         uses: docker/build-push-action@v2
@@ -206,10 +198,9 @@ jobs:
             module=${{ matrix.module }}
           cache-from: type=local,src=/tmp/.buildx-cache
           load: true
-          labels: ${{ needs.setup.outputs.labels }}
+          labels: ${{ steps.docker.outputs.labels }}
           tags: |
-            ${{ env.EDITOR_IMAGE }}:${{ matrix.version }}-${{ matrix.module }}-${{ github.event.inputs.repoTag }}
-            ${{ env.EDITOR_IMAGE }}:${{ matrix.version }}-${{ matrix.module }}
+            ${{ steps.docker.outputs.tags }}
             ${{ env.EDITOR_IMAGE }}:${{ steps.check.outputs.dockerTag }}
 
       - name: Push
@@ -221,7 +212,7 @@ jobs:
           docker push ${{ env.EDITOR_IMAGE }} \
             || docker push ${{ env.EDITOR_IMAGE }} \
             || docker push ${{ env.EDITOR_IMAGE }}
-
+  # 
   request-alf:
     name: Request Activation License File
     needs: [setup, build]
@@ -235,16 +226,18 @@ jobs:
           token: ${{ secrets.GH_WORKFLOW_TOKEN }}
           inputs: '{ "repoTag": "${{ github.event.inputs.repoTag }}" }'
 
+  # 
   build-modules:
-    name: Request Activation License File
-    needs: [setup, build]
+    name: Build Editor
+    needs: [setup, build, request-alf]
     if: always() && needs.setup.outputs.exit != 'true' && github.event.inputs.module == 'base'
     runs-on: ubuntu-18.04
     strategy:
       matrix:
         module: [linux-il2cpp, windows-mono, mac-mono, ios, android, webgl]
     steps:
-      - name: Build Editor for ${{ matrix.module }}
+      - run: sleep 60
+      - name: Build Editor ${{ matrix.module }}
         uses: benc-uk/workflow-dispatch@v1
         with:
           workflow: Build Editor
