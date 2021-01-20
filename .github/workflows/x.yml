@@ -1,0 +1,16 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-18.04
+    steps:
+      - run: |
+          echo $DOCKER_TOKEN
+          echo $DOCKER_TOKEN > token
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
