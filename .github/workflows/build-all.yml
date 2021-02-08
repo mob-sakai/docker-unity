@@ -45,7 +45,7 @@ jobs:
           username: ${{ env.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
       - name: Cache Docker layers
-        uses: actions/cache@v2
+        uses: actions/cache@v2.1.4
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-${{ steps.latest.outputs.tag }}
