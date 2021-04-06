@@ -179,7 +179,7 @@ jobs:
       ###########################
       #      Editor image       #
       ###########################
-      - uses: crazy-max/ghaction-docker-meta@v1
+      - uses: crazy-max/ghaction-docker-meta@v2.2.1
         id: docker
         with:
           images: ${{ env.EDITOR_IMAGE }}
