@@ -150,7 +150,7 @@ jobs:
       # Do not cache each version because it is too small to install Unity.
       - name: Cache Docker layers
         if: steps.check.outputs.changeset != ''
-        uses: actions/cache@v2
+        uses: actions/cache@v2.1.5
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-${{ github.event.inputs.repoTag }}
