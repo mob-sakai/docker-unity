@@ -99,7 +99,7 @@ jobs:
           name: UnityActivationLicenseFiles
           path: UnityActivationLicenseFiles
 
-      - uses: meeDamian/github-release@2.0
+      - uses: meeDamian/github-release@v2.0.3
         with:
           token: ${{ github.token }}
           tag: ${{ github.event.inputs.repoTag }}
