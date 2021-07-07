@@ -54,7 +54,7 @@ jobs:
       ###########################
       #  Build and push (Base)  #
       ###########################
-      - uses: crazy-max/ghaction-docker-meta@v1
+      - uses: crazy-max/ghaction-docker-meta@v3.4.0
         id: base_docker
         with:
           images: ${{ env.BASE_IMAGE }}
@@ -72,7 +72,7 @@ jobs:
       ###########################
       #  Build and push (Hub)   #
       ###########################
-      - uses: crazy-max/ghaction-docker-meta@v1
+      - uses: crazy-max/ghaction-docker-meta@v3.4.0
         id: hub_docker
         with:
           images: ${{ env.HUB_IMAGE }}
