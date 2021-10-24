@@ -1,3 +1,11 @@
+:warning: NOTE: This project has been integrated into [mob-sakai/docker](https://github.com/mob-sakai/docker), so we are NOT continuing development in this repository. :warning: 
+--
+
+<br><br><br>
+<br><br><br>
+<br><br><br>
+<br><br><br>
+
 # Docker - Unity3d
 
 Source of CI specialised docker images for Unity.
